@@ -22,7 +22,46 @@ const serverBadge = document.getElementById('serverBadge');
 const badgeDot = document.getElementById('badgeDot');
 const badgeLabel = document.getElementById('badgeLabel');
 const connectedServerLabel = document.getElementById('connectedServerLabel');
-const serverTypeBadge = document.getElementById('serverTypeBadge');
+function buildServerOptions() {
+  const options = [];
+  KNOWN_SERVERS.forEach((url, index) => {
+    const key = `server-${index}`;
+    options.push(
+      `<option value="${escapeHtml(url)}" data-key="${key}">${escapeHtml(url)}</option>`
+    );
+  });
+  return options.join('');
+}
+
+function populateServerDropdown() {
+  const select = document.getElementById('serverDropdown');
+  if (!select) return;
+  select.innerHTML = buildServerOptions();
+  select.value = KNOWN_SERVERS[serverIndex] || DEFAULT_URL;
+  select.addEventListener('change', () => {
+    serverIndex = parseInt(select.value.split('-')[1], 10);
+    serverUrlInput.value = select.value;
+  });
+}
+
+function fillServerDropdownOnConnect() {
+  const select = document.getElementById('serverDropdown');
+  if (!select) return;
+  const value = serverUrlInput.value.trim() || DEFAULT_URL;
+  select.value = value;
+  serverIndex = KNOWN_SERVERS.indexOf(value);
+  if (serverIndex === -1) {
+    serverIndex = 0;
+    select.value = KNOWN_SERVERS[serverIndex];
+  }
+  serverUrlInput.value = select.value;
+}
+
+function setServerUrlInput(value) {
+  serverUrlInput.value = value;
+  const select = document.getElementById('serverDropdown');
+  if (select) select.value = value;
+}
 
 // ---------------------------------------------------------------------------
 // Configuration
