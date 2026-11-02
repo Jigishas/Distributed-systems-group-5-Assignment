@@ -1,0 +1,26 @@
+{
+  "name": "distributed-chat",
+  "version": "1.0.0",
+  "description": "A simple distributed chat application with multiple server nodes and clients using Node.js + socket.io.",
+  "main": "server/server.js",
+  "scripts": {
+    "server": "node server/server.js",
+    "client": "node client/client.js",
+    "test": "node --test tests/chat.test.js"
+  },
+  "keywords": [
+    "chat",
+    "distributed",
+    "socket.io",
+    "tcp",
+    "nodejs",
+    "realtime"
+  ],
+  "author": "Distributed Systems Assignment",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "socket.io": "^4.7.2",
+    "socket.io-client": "^4.8.4"
+  }
+}

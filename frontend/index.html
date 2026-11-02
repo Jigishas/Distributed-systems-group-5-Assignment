@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Distributed Chat</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+    <!-- Header / server status -->
+    <header class="header">
+      <div class="brand">
+        <span class="brand-icon">&#128172;</span>
+        <span class="brand-text">Distributed Chat</span>
+      </div>
+      <div class="server-badge" id="serverBadge">
+        <span class="badge-dot" id="badgeDot"></span>
+        <span id="badgeLabel">Disconnected</span>
+      </div>
+    </header>
+
+    <!-- Connection panel (shown until user enters a name) -->
+    <section class="connect-panel" id="connectPanel">
+      <div class="connect-card">
+        <h2>Join the Chat</h2>
+        <p>Enter your name to connect to the distributed chat server.</p>
+        <div class="form-row">
+          <label for="username">Your name</label>
+          <input type="text" id="username" placeholder="e.g. Alice" maxlength="30" />
+        </div>
+        <div class="form-row">
+          <label for="serverUrl">Server URL</label>
+          <input type="text" id="serverUrl" value="" placeholder="http://127.0.0.1:4000" />
+          <span class="url-hint">Leave empty for default (port 4000)</span>
+        </div>
+        <button class="btn-primary" id="connectBtn">Connect</button>
+        <div class="connect-hint">
+          Tip: If the primary server goes down, the client will auto-fail over
+          to the replica server.
+        </div>
+      </div>
+    </section>
+
+    <!-- Chat interface (hidden until connected) -->
+    <section class="chat-panel" id="chatPanel" style="display:none;">
+      <div class="chat-header">
+        <div class="chat-title">
+          <span id="connectedServerLabel">Server</span>
+          <span class="server-type-badge" id="serverTypeBadge">primary</span>
+        </div>
+        <div class="chat-controls">
+          <button class="btn-ghost" id="disconnectBtn">Disconnect</button>
+        </div>
+      </div>
+
+      <div class="chat-messages" id="messages"></div>
+
+      <div class="chat-input-area">
+        <form id="messageForm" autocomplete="off">
+          <input
+            type="text"
+            id="messageInput"
+            placeholder="Type a message and press Enter..."
+            disabled
+          />
+          <button type="submit" class="btn-primary" id="sendBtn" disabled>Send</button>
+        </form>
+        <div class="status-bar" id="statusBar">
+          <span id="statusText">Ready</span>
+          <span class="history-count" id="historyCount"></span>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- Socket.io client library served by the server -->
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
+
