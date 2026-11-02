@@ -1,10 +1,4 @@
-/* ==========================================================================
-   Distributed Chat — Frontend Application Logic
-   ========================================================================== */
-
-// ---------------------------------------------------------------------------
-// DOM elements
-// ---------------------------------------------------------------------------
+'use strict';
 
 const connectPanel = document.getElementById('connectPanel');
 const chatPanel = document.getElementById('chatPanel');
@@ -22,249 +16,68 @@ const serverBadge = document.getElementById('serverBadge');
 const badgeDot = document.getElementById('badgeDot');
 const badgeLabel = document.getElementById('badgeLabel');
 const connectedServerLabel = document.getElementById('connectedServerLabel');
-function buildServerOptions() {
-  const options = [];
-  KNOWN_SERVERS.forEach((url, index) => {
-    const key = `server-${index}`;
-    options.push(
-      `<option value="${escapeHtml(url)}" data-key="${key}">${escapeHtml(url)}</option>`
-    );
-  });
-  return options.join('');
-}
+const serverTypeBadge = document.getElementById('serverTypeBadge');
 
-function populateServerDropdown() {
-  const select = document.getElementById('serverDropdown');
-  if (!select) return;
-  select.innerHTML = buildServerOptions();
-  select.value = KNOWN_SERVERS[serverIndex] || DEFAULT_URL;
-  select.addEventListener('change', () => {
-    serverIndex = parseInt(select.value.split('-')[1], 10);
-    serverUrlInput.value = select.value;
-  });
-}
-
-function fillServerDropdownOnConnect() {
-  const select = document.getElementById('serverDropdown');
-  if (!select) return;
-  const value = serverUrlInput.value.trim() || DEFAULT_URL;
-  select.value = value;
-  serverIndex = KNOWN_SERVERS.indexOf(value);
-  if (serverIndex === -1) {
-    serverIndex = 0;
-    select.value = KNOWN_SERVERS[serverIndex];
-  }
-  serverUrlInput.value = select.value;
-}
-
-function setServerUrlInput(value) {
-  serverUrlInput.value = value;
-  const select = document.getElementById('serverDropdown');
-  if (select) select.value = value;
-}
-
-// ---------------------------------------------------------------------------
-// Configuration
-// ---------------------------------------------------------------------------
-
-const DEFAULT_URL = 'http://127.0.0.1:4000';
-const REPLICA_URL = 'http://127.0.0.1:4001';
-const KNOWN_SERVERS = [DEFAULT_URL, REPLICA_URL];
+const DEFAULT_SERVERS = ['http://127.0.0.1:4000', 'http://127.0.0.1:4001'];
+const KNOWN_SERVERS = window.CHAT_SERVERS || DEFAULT_SERVERS;
+const DEFAULT_URL = KNOWN_SERVERS[0] || DEFAULT_SERVERS[0];
 const RECONNECT_DELAY_MS = 3000;
 
 let socket = null;
 let currentUser = '';
 let currentUrl = '';
 let serverIndex = 0;
-let isConnected = false;
 let reconnectTimer = null;
 let messageCount = 0;
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+const displayedMessageIds = new Set();
 
 function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
+  const element = document.createElement('div');
+  element.textContent = text;
+  return element.innerHTML;
 }
 
 function formatTime(iso) {
   if (!iso) return '';
-  const d = new Date(iso);
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-function addMessage(message, options = {}) {
-  const isOwn = options.own === true;
-  const isSystem = options.system === true;
-  const div = document.createElement('div');
-  div.className = `message ${isOwn ? 'own' : isSystem ? 'system' : 'other'}`;
-  const time = formatTime(message.timestamp);
-  const sender = escapeHtml(message.sender || 'System');
-  const text = escapeHtml(message.text || message.message || '');
-  div.innerHTML = `
-    <div>${sender}</div>
-    <div>${text}</div>
-    <span class="meta">${time}  •  ${message.serverId || '?'}</span>
+function addMessage(message, own = false) {
+  if (message.id && displayedMessageIds.has(message.id)) return;
+  if (message.id) displayedMessageIds.add(message.id);
+
+  const element = document.createElement('div');
+  element.className = `message ${own ? 'own' : 'other'}`;
+  element.innerHTML = `
+    <div>${escapeHtml(message.sender || 'Unknown')}</div>
+    <div>${escapeHtml(message.text || '')}</div>
+    <span class="meta">${formatTime(message.timestamp)}  •  ${escapeHtml(message.serverId || '?')}</span>
   `;
-  messagesEl.appendChild(div);
-  scrollToBottom();
-  messageCount++;
-  if (historyCount) historyCount.textContent = `${messageCount} message(s)`;
+  messagesEl.appendChild(element);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+  messageCount += 1;
+  historyCount.textContent = `${messageCount} message(s)`;
 }
 
 function addSystemMessage(text) {
-  const div = document.createElement('div');
-  div.className = 'message system';
-  div.textContent = text;
-  messagesEl.appendChild(div);
-  scrollToBottom();
-}
-
-function clearMessages() {
-  messagesEl.innerHTML = '';
-  messageCount = 0;
-  if (historyCount) historyCount.textContent = '';
-}
-
-function enableChatUI(enabled) {
-  messageInput.disabled = !enabled;
-function connect(url, userName) {
-  if (socket) {
-    socket.disconnect();
-    socket = null;
-  }
-  currentUrl = url;
-  currentUser = userName;
-  isConnected = false;
-  enableChatUI(false);
-
-  console.log(`[frontend] connecting to ${url} as ${userName}`);
-  setStatus('Connecting…', 'neutral');
-
-  socket = io(url, { transports: ['websocket'], reconnection: false });
-
-  socket.on('connect', () => {
-    isConnected = true;
-    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
-    console.log(`[frontend] connected to ${url}`);
-    setStatus('Connected', 'connected');
-    serverBadge.style.background = '#dcfce7';
-    socket.emit('identify', userName);
-    showPanel('chat');
-    enableChatUI(true);
-    addSystemMessage(`Connected to ${url}`);
-  });
-
-  socket.on('connect_error', (err) => {
-    console.log(`[frontend] connection error: ${err.message}`);
-    setStatus('Connection failed', 'disconnected');
-    scheduleReconnect();
-  });
-
-  socket.on('disconnect', (reason) => {
-    isConnected = false;
-    console.log(`[frontend] disconnected (${reason})`);
-    setStatus('Disconnected', 'disconnected');
-    showPanel('connect');
-    enableChatUI(false);
-    scheduleReconnect();
-  });
-
-  socket.on('server:join', (payload) => {
-    connectedServerLabel.textContent = payload.serverId || 'Unknown';
-    serverTypeBadge.textContent = payload.replica ? 'replica' : 'primary';
-    serverTypeBadge.className = 'server-type-badge ' + (payload.replica ? 'replica' : 'primary');
-    addSystemMessage(`${payload.name} joined — ${payload.serverCount} node(s) known`);
-  });
-
-  socket.on('history', (payload) => {
-    const messages = payload.messages || [];
-    if (messages.length > 0) {
-      addSystemMessage(`Replaying ${messages.length} message(s) from history`);
-      messages.forEach((m) => addMessage(m, { own: m.senderId === socket.id }));
-    }
-  });
-
-  socket.on('chat:message', (message) => {
-    addMessage(message, { own: message.senderId === socket.id });
-  });
-
-  socket.on('error', (err) => {
-    console.log(`[frontend] socket error: ${err.message}`);
-  });
-}
-
-function scheduleReconnect() {
-  if (reconnectTimer) return;
-  serverIndex = (serverIndex + 1) % KNOWN_SERVERS.length;
-  const nextUrl = KNOWN_SERVERS[serverIndex];
-// ---------------------------------------------------------------------------
-// Event listeners
-// ---------------------------------------------------------------------------
-
-connectBtn.addEventListener('click', () => {
-  const name = usernameInput.value.trim();
-  const url = serverUrlInput.value.trim() || DEFAULT_URL;
-  if (!name) {
-    usernameInput.focus();
-    return;
-  }
-  connect(url, name);
-});
-
-usernameInput.addEventListener('keypress', (e) => {
-  if (e.key === 'Enter') connectBtn.click();
-});
-
-disconnectBtn.addEventListener('click', () => {
-  if (socket) socket.disconnect();
-  showPanel('connect');
-  enableChatUI(false);
-  setStatus('Disconnected', 'disconnected');
-  clearMessages();
-});
-
-messageForm.addEventListener('submit', (e) => {
-  e.preventDefault();
-  const text = messageInput.value.trim();
-  if (!text || !isConnected || !socket) return;
-  socket.emit('chat:message', { text, sender: currentUser });
-  addMessage({ text, sender: currentUser, timestamp: new Date().toISOString() }, { own: true });
-  messageInput.value = '';
-});
-
-// Initialize
-showPanel('connect');
-usernameInput.focus();
-
-  setStatus(`Retrying ${nextUrl} in ${RECONNECT_DELAY_MS / 1000}s…`, 'reconnecting');
-  reconnectTimer = setTimeout(() => {
-    reconnectTimer = null;
-    connect(nextUrl, currentUser);
-  }, RECONNECT_DELAY_MS);
-}
-
-  sendBtn.disabled = !enabled;
-  if (enabled) messageInput.focus();
+  const element = document.createElement('div');
+  element.className = 'message system';
+  element.textContent = text;
+  messagesEl.appendChild(element);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
 function setStatus(text, type = 'neutral') {
   statusText.textContent = text;
-  badgeDot.className = 'badge-dot';
   badgeLabel.textContent = text;
-  if (type === 'connected') {
-    badgeDot.classList.add('connected');
-    badgeLabel.textContent = 'Connected';
-  } else if (type === 'disconnected') {
-    badgeDot.classList.add('disconnected');
-    badgeLabel.textContent = 'Disconnected';
-  } else if (type === 'reconnecting') {
-    badgeDot.classList.add('reconnecting');
-    badgeLabel.textContent = 'Reconnecting...';
-  }
+  badgeDot.className = `badge-dot${type === 'neutral' ? '' : ` ${type}`}`;
+  serverBadge.style.background = type === 'connected' ? '#dcfce7' : '';
+}
+
+function enableChat(enabled) {
+  messageInput.disabled = !enabled;
+  sendBtn.disabled = !enabled;
+  if (enabled) messageInput.focus();
 }
 
 function showPanel(panel) {
@@ -272,7 +85,112 @@ function showPanel(panel) {
   chatPanel.style.display = panel === 'chat' ? 'flex' : 'none';
 }
 
-function scrollToBottom() {
-  messagesEl.scrollTop = messagesEl.scrollHeight;
+function connect(url, userName) {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  const previousConnection = socket;
+  socket = null;
+  if (previousConnection) previousConnection.disconnect();
+
+  currentUrl = url;
+  currentUser = userName;
+  const knownIndex = KNOWN_SERVERS.indexOf(url);
+  serverIndex = knownIndex === -1 ? -1 : knownIndex;
+  enableChat(false);
+  setStatus('Connecting...', 'reconnecting');
+
+  const connection = io(url, { transports: ['websocket'], reconnection: false });
+  socket = connection;
+
+  connection.on('connect', () => {
+    if (socket !== connection) return;
+    serverIndex = KNOWN_SERVERS.indexOf(url);
+    setStatus('Connected', 'connected');
+    showPanel('chat');
+    enableChat(true);
+    connection.emit('identify', userName);
+  });
+
+  connection.on('connect_error', (error) => {
+    if (socket !== connection) return;
+    setStatus(`Connection failed: ${error.message}`, 'disconnected');
+    scheduleReconnect();
+  });
+
+  connection.on('disconnect', () => {
+    if (socket !== connection) return;
+    setStatus('Disconnected', 'disconnected');
+    enableChat(false);
+    scheduleReconnect();
+  });
+
+  connection.on('server:join', (payload) => {
+    connectedServerLabel.textContent = payload.serverId || 'Unknown';
+    const type = payload.replica ? 'replica' : 'primary';
+    serverTypeBadge.textContent = type;
+    serverTypeBadge.className = `server-type-badge ${type}`;
+    addSystemMessage(`Connected to ${payload.name} — ${payload.serverCount} node(s) known`);
+  });
+
+  connection.on('history', (payload) => {
+    messagesEl.innerHTML = '';
+    displayedMessageIds.clear();
+    messageCount = 0;
+    historyCount.textContent = '';
+    (payload.messages || []).forEach((message) => addMessage(message, message.sender === currentUser));
+  });
+
+  connection.on('chat:message', (message) => addMessage(message));
+  connection.on('chat:error', (error) => addSystemMessage(error.message));
 }
 
+function scheduleReconnect() {
+  if (reconnectTimer) return;
+  serverIndex = (serverIndex + 1) % KNOWN_SERVERS.length;
+  const nextUrl = KNOWN_SERVERS[serverIndex];
+  setStatus(`Retrying ${nextUrl} in ${RECONNECT_DELAY_MS / 1000}s...`, 'reconnecting');
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    connect(nextUrl, currentUser);
+  }, RECONNECT_DELAY_MS);
+}
+
+connectBtn.addEventListener('click', () => {
+  const name = usernameInput.value.trim();
+  if (!name) {
+    usernameInput.focus();
+    return;
+  }
+  connect(serverUrlInput.value.trim() || DEFAULT_URL, name);
+});
+
+usernameInput.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') connectBtn.click();
+});
+
+disconnectBtn.addEventListener('click', () => {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  const connection = socket;
+  socket = null;
+  if (connection) connection.disconnect();
+  showPanel('connect');
+  enableChat(false);
+  setStatus('Disconnected', 'disconnected');
+});
+
+messageForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  const text = messageInput.value.trim();
+  if (!text || !socket || !socket.connected) return;
+  socket.emit('chat:message', { text });
+  addMessage({ text, sender: currentUser, timestamp: new Date().toISOString() }, true);
+  messageInput.value = '';
+});
+
+showPanel('connect');
+usernameInput.focus();

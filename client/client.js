@@ -1,38 +1,19 @@
 'use strict';
-
-/**
- * Chat Client
- * ---------------------------------------------------------------
- * A simple command-line chat client that connects to a distributed
- * chat server via socket.io (WebSocket).
- *
- * Features:
- *   - Connect to a server node (primary or replica)
- *   - Send chat messages to all other connected clients
- *   - Receive and display broadcast messages in real time
- *   - Auto-reconnect / failover to another server node if the
- *     current connection drops
- *   - Replay persisted message history on reconnect
- *
- * Usage (run from the project root):
- *   node client/client.js                          # default server (port 4000)
- *   node client/client.js --url http://127.0.0.1:4001  # connect to replica
- *   node client/client.js --name Alice              # set your display name
- *
- * Commands at the prompt:
- *   <type and press Enter>   send a chat message
- *   /quit                    exit the client
- */
-
 const io = require('socket.io-client');
 const readline = require('readline');
+
+const DEFAULT_SERVERS = ['http://127.0.0.1:4000', 'http://127.0.0.1:4001'];
+const KNOWN_SERVERS = (process.env.CHAT_SERVERS || DEFAULT_SERVERS.join(','))
+  .split(',')
+  .map((url) => url.trim())
+  .filter(Boolean);
 
 // ---------------------------------------------------------------------------
 // CLI / configuration
 // ---------------------------------------------------------------------------
 
 const args = process.argv.slice(2);
-let serverUrl = 'http://127.0.0.1:4000';
+let serverUrl = KNOWN_SERVERS[0] || DEFAULT_SERVERS[0];
 let clientName = 'Anonymous';
 
 for (let i = 0; i < args.length; i++) {
@@ -46,15 +27,7 @@ for (let i = 0; i < args.length; i++) {
 }
 
 // List of known server nodes for failover (order = priority).
-const KNOWN_SERVERS = [
-  'http://127.0.0.1:4000', // primary
-  'http://127.0.0.1:4001', // replica
-];
-
 let currentUrlIndex = KNOWN_SERVERS.indexOf(serverUrl);
-if (currentUrlIndex === -1) {
-  currentUrlIndex = 0;
-}
 
 let socket = null;
 let isConnected = false;
@@ -73,50 +46,55 @@ const rl = readline.createInterface({
 
 function log(message) {
   process.stdout.write(`\r${message}\n${clientName}> `);
+}
 
 // ---------------------------------------------------------------------------
 // Connection handling
 // ---------------------------------------------------------------------------
 
 function connect(url) {
-  if (socket) {
-    socket.disconnect();
-    socket = null;
-  }
+  const previousConnection = socket;
+  socket = null;
+  if (previousConnection) previousConnection.disconnect();
   serverUrl = url;
   isConnected = false;
 
   console.log(`\n[client] connecting to ${serverUrl}...`);
-  socket = io(url, { transports: ['websocket'], reconnection: false });
+  const connection = io(url, { transports: ['websocket'], reconnection: false });
+  socket = connection;
 
-  socket.on('connect', () => {
+  connection.on('connect', () => {
+    if (socket !== connection) return;
     isConnected = true;
+    currentUrlIndex = KNOWN_SERVERS.indexOf(url);
     if (reconnectTimer) {
       clearTimeout(reconnectTimer);
       reconnectTimer = null;
     }
     console.log(`[client] connected to ${serverUrl}`);
-    socket.emit('identify', clientName);
+    connection.emit('identify', clientName);
     rl.prompt();
   });
 
-  socket.on('connect_error', (err) => {
+  connection.on('connect_error', (err) => {
+    if (socket !== connection) return;
     console.log(`[client] connection error: ${err.message}`);
     scheduleReconnect();
   });
 
-  socket.on('disconnect', (reason) => {
+  connection.on('disconnect', (reason) => {
+    if (socket !== connection) return;
     isConnected = false;
     console.log(`\n[client] disconnected from ${serverUrl} (${reason})`);
     scheduleReconnect();
   });
 
-  socket.on('server:join', (payload) => {
+  connection.on('server:join', (payload) => {
     console.log(`\n[server] ${payload.name} joined (${payload.serverId}), ${payload.serverCount} node(s) known`);
     rl.prompt();
   });
 
-  socket.on('history', (payload) => {
+  connection.on('history', (payload) => {
     const messages = payload.messages || [];
     if (messages.length > 0) {
       console.log(`\n[history] ${messages.length} message(s) from server log:`);
@@ -127,15 +105,20 @@ function connect(url) {
     rl.prompt();
   });
 
-  socket.on('chat:message', (message) => {
+  connection.on('chat:message', (message) => {
     const time = message.timestamp.slice(11, 19);
     const sender = message.sender || 'unknown';
     console.log(`\n[${time}] ${sender}: ${message.text}`);
     rl.prompt();
   });
 
-  socket.on('error', (err) => {
+  connection.on('error', (err) => {
     console.log(`\n[client] socket error: ${err.message}`);
+  });
+
+  connection.on('chat:error', (err) => {
+    console.log(`\n[server] ${err.message}`);
+    rl.prompt();
   });
 }
 
@@ -186,9 +169,7 @@ rl.on('close', () => {
 
 printWelcome();
 connect(serverUrl);
-
-  rl.prompt(true);
-}
+rl.prompt();
 
 function printWelcome() {
   console.log('========================================');
@@ -199,4 +180,3 @@ function printWelcome() {
   console.log("  Type '/quit' to exit.");
   console.log('========================================\n');
 }
-

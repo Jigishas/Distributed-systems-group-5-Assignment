@@ -1,0 +1,4 @@
+{"id":"1793647234421-ikb1lo","senderId":"DWpEiZ8cpgISY9vGAAAA","serverId":"server-1","timestamp":"2026-11-02T19:20:34.422Z","sender":"Alice","text":"Hello"}
+{"id":"1793648016074-gmql05","senderId":"SUpNtthPez1Zj6cJAAAB","serverId":"server-2","timestamp":"2026-11-02T19:33:36.074Z","sender":"Bob","text":"Hello"}
+{"id":"1793648262765-bo38b3","senderId":"DWpEiZ8cpgISY9vGAAAA","serverId":"server-1","timestamp":"2026-11-02T19:37:42.765Z","sender":"Alice","text":"Group 6"}
+{"id":"1793648271126-3rebze","senderId":"SUpNtthPez1Zj6cJAAAB","serverId":"server-2","timestamp":"2026-11-02T19:37:51.126Z","sender":"Bob","text":"Yes"}

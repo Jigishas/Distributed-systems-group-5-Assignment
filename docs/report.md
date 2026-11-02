@@ -2,132 +2,91 @@
 
 ## 1. Architecture
 
-The application follows a classic client–server model extended with multiple
-server nodes for redundancy. Every component communicates over WebSocket
-(socket.io) atop HTTP.
-
-### Components
+The application uses Node.js, Express, and Socket.IO. Each server process
+accepts browser and command-line clients over WebSocket and maintains an
+outbound Socket.IO connection to each configured peer node.
 
 | Component | Responsibility |
 |-----------|----------------|
-| **Client** | Command-line interface; connects to a server node, sends/receives chat messages in real time, and auto-fails over to a backup node on disconnect. |
-| **Server node** | Accepts WebSocket client connections, broadcasts messages to all peers on the same node, exposes `/health` and `/servers` endpoints, persists messages to disk, and registers itself in the cluster registry. |
-| **Registry** | In-memory map (per node) tracking known server nodes (id, name, host, port, primary/replica flag, last heartbeat). Used by clients for failover discovery. |
-| **Message store** | Append-only JSON Lines log (`data/messages.jsonl`) storing every broadcast message with id, sender, server id, timestamp, and text. Enables history replay after reconnect/crash. |
+| Client | Identifies itself, sends and displays messages, and tries another configured server after a disconnect. |
+| Server node | Handles concurrent sockets, validates client names and messages, broadcasts locally, exposes health and node-information endpoints, and persists message history. |
+| Peer connection | Authenticated server-to-server socket used to relay a message to other nodes. A receiving node persists and delivers it to its local clients without relaying it again. |
+| Message store | Per-node append-only JSON Lines history. Relayed messages are also saved by receiving nodes so history follows clients during failover. |
 
-### Data flow (normal operation)
+### Normal message flow
 
-1. Client A connects to Server-1 (primary, port 4000) and emits `identify`.
-2. Client A sends `chat:message` → Server-1.
-3. Server-1 appends the message to `messages.jsonl`, then fans it out to every
-   connected client except the sender (`chat:message` event).
-4. Client B (and any other clients) receive and render the message.
+1. A client connects to either server and sends its display name.
+2. Its server validates the message, assigns the sender identity and metadata,
+   appends it to the local history file, and delivers it to other local clients.
+3. The server relays the message to connected peers. Each peer saves it and
+   delivers it to its own local clients.
+4. On reconnect, a client requests the history stored by its current node.
 
-### Data flow (failover)
+### Failure handling
 
-1. Server-1 crashes or is killed.
-2. Client A's socket `disconnect` fires; the client schedules reconnection.
-3. Client A tries the next known server node (Server-2 replica, port 4001).
-4. On connect, Client A re-identifies and receives persisted history from the
-   new server's `messages.jsonl`.
-5. Chatting resumes with minimal interruption (~3 s reconnect delay).
+Clients try the other address in their configured server list after losing a
+connection. Nodes continue serving local clients if a peer is unavailable;
+peer sockets retry their connections. Messages sent while nodes are
+disconnected are not queued for later delivery, but each node retains its own
+persisted history. This is basic failover, not consensus or guaranteed
+exactly-once delivery.
 
-## 2. Challenges and Solutions
+## 2. Challenges and solutions
 
+### Cross-node delivery
 
-### Challenge 1 — npm / package installation in restricted environment
+Local-only fan-out meant that clients connected to separate servers could not
+chat. The solution is an authenticated peer socket: the origin server sends a
+message to connected peers, which deliver locally and do not forward it again.
+This keeps the two-node flow simple and avoids relay loops.
 
-`npm install` repeatedly reported "up to date" while `node_modules` stayed
-empty, and the npm cache directory did not exist. Retrying with verbose
-logging and removing stale lock files eventually allowed packages to be fetched
-(`express`, `socket.io`, `socket.io-client`).
+### Reconnect and history consistency
 
-**Solution:** Cleaned `package-lock.json` and retried `npm install`. All three
-packages are now installed and the application imports cleanly.
+Failover would be less useful if the backup server lacked recent messages.
+Each node therefore appends both locally originated and peer-relayed messages
+to its own JSON Lines file. Logs are separated by node to avoid multiple
+processes writing to the same file.
 
-### Challenge 2 — File duplication / ordering when writing server.js
+### Client behavior and input handling
 
-The `server.js` file ended up with duplicated header blocks and misplaced
-`/servers` route definitions (after `serverHttp.listen()` instead of before),
-plus a stray `});` that caused a syntax error.
+The CLI client had a misplaced function boundary that stopped its connection
+setup from running, and the browser client had malformed function structure.
+Both clients now connect, identify, render history, and schedule failover.
+Servers reject unidentified senders, blank or oversized names, and blank or
+oversized messages; sender names are taken from the established socket rather
+than trusted from each message.
 
-**Solution:** Deleted and recreated `server.js` in two sequential chunks using
-`insert_line`, ensuring routes are registered before `listen()` and removing
-the stray closing bracket. Verified with `node --check`.
+## 3. Evaluation
 
-### Challenge 3 — Basic fault tolerance without a single point of failure
+`npm test` includes unit tests for the registry and message store, a health
+endpoint check, and a two-process integration test. The integration test starts
+two nodes with isolated data directories, waits for their peer connections,
+sends a message from a client on one node to a client on the other, and verifies
+that a new client on the receiving node can retrieve that message from history.
 
-A central service-discovery server (e.g. Consul, etcd) would itself become a
-single point of failure, contradicting the fault-tolerance goal.
+This verifies the required multi-node relay and persistence paths. It is not a
+throughput benchmark: no production-scale load or latency figures are claimed.
+For a repeatable load evaluation, increase the number of connected clients and
+messages in the integration test and record message delivery time, missed
+messages, and CPU/memory use on the test machine.
 
-**Solution:** Each server node maintains its own in-memory registry. Clients
-are given a static priority list of known server URLs (primary → replica).
-On disconnect, the client walks the list until it finds a live node. No
-central coordinator is required.
+### Limitations and improvements
 
-### Challenge 4 — Message persistence across crashes
-
-Without persistence, all chat history is lost when a server restarts.
-
-**Solution:** Every broadcast is appended to a JSON Lines file before being
-acked to clients. On reconnect, the new server streams `history` so the client
-can replay past messages. A crash mid-write may lose at most one message
-per process (acceptable for this assignment's "basic" fault-tolerance level).
-
-### Challenge 5 — Concurrent client management
-
-Each server must handle many simultaneous WebSocket connections without
-blocking.
-
-**Solution:** Node.js's single-threaded event loop combined with socket.io's
-asynchronous I/O naturally handles concurrency. Connected clients are tracked
-in a `Map<socket.id, socket>`, and broadcasts iterate the map non-blocking.
-
-## 3. Performance Evaluation
-
-### Measured / observed behaviour
-
-| Scenario | Observation |
-|----------|-------------|
-| 2 clients, 1 server | Messages delivered < 10 ms locally |
-| 10 clients, 1 server | All broadcasts received; no dropped messages under light load |
-| Primary killed, client auto-reconnect | Reconnect to replica in ~3 s; history replayed on new node |
-| 1 server stopped mid-chat | Clients on the other server continue uninterrupted |
-
-### Bottlenecks
-
-1. **Single-node fan-out**: All messages on a server are broadcast by looping
-   over the client map. For thousands of concurrent clients on one node this
-   becomes a CPU/memory bottleneck.
-2. **No cross-server message sync**: A message sent to a client on Server-1 is
-   not automatically forwarded to clients connected to Server-2. Each server
-   only knows its own connected clients.
-3. **JSON Lines store**: Appending and fsync'ing every message is safe but
-   slow under high write volume. Reading the entire log for history replay
-   is O(n) in log size.
-4. **In-memory registry**: Server nodes don't share state; if the registry on
-   one node is stale, clients may be directed to a dead node.
-
-### Potential improvements
-
-1. **Cross-server message bus** (Redis Pub/Sub or a lightweight gossip layer)
-   so a message published on any node is delivered to clients on all nodes.
-2. **Database-backed persistence** (PostgreSQL / Redis) instead of JSON Lines
-   for durable, queryable history and cross-node consistency.
-3. **Consistent service discovery** (Consul, etcd, or Kubernetes DNS) to
-   replace the static client-side server list and in-memory registry.
-4. **Horizontal scaling** behind a load balancer with sticky sessions disabled,
-   relying on the message bus for cross-node delivery.
-5. **Heartbeat-based health checks** from clients to servers (currently the
-   server self-reports health; clients could actively probe).
-6. **Acknowledgements / message IDs** so clients can detect and resend missed
-   messages.
-7. **GUI client** (web browser UI) instead of CLI, for broader usability.
+1. The peer topology is configured statically. A larger cluster would benefit
+   from service discovery and a scalable message broker such as Redis Pub/Sub.
+2. Messages are not queued or reconciled when a peer is disconnected, and
+   retries can leave a brief delivery gap during failover.
+3. JSON Lines history is read in full on reconnect, so large logs need rotation
+   or a database with paginated history.
+4. The registry is process-local and does not discover peers; client failover
+   uses known URLs. A cluster manager could provide dynamic membership.
+5. The shared development token must be replaced with a secret in deployments,
+   and production use would also require TLS, authorization, and rate limits.
 
 ## 4. Conclusion
 
-The distributed chat application meets the assignment requirements: multiple
-server nodes (primary + replica), real-time WebSocket broadcasting, threaded
-concurrent client handling, basic failover with auto-reconnect, and optional
-message persistence. The code is modular, well-commented, and includes unit/
-integration tests plus a README with setup and usage instructions.
+The application provides two chat server nodes, concurrent client connections,
+real-time cross-node message relay, client reconnection, and replicated
+append-only message history. The integration test checks the core distributed
+path. Durable peer queues, dynamic discovery, and measured high-load behavior
+remain possible extensions.
