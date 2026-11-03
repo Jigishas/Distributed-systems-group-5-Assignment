@@ -49,7 +49,7 @@ function addMessage(message, own = false) {
   const element = document.createElement('div');
   element.className = `message ${own ? 'own' : 'other'}`;
   element.innerHTML = `
-    <div>${escapeHtml(message.sender || 'Unknown')}</div>
+    <div class="sender">${escapeHtml(message.sender || 'Unknown')}</div>
     <div>${escapeHtml(message.text || '')}</div>
     <span class="meta">${formatTime(message.timestamp)}  •  ${escapeHtml(message.serverId || '?')}</span>
   `;

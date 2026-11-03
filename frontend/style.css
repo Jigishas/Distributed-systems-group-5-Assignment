@@ -239,6 +239,10 @@ html, body {
   font-weight: 600;
 }
 
+.message .sender {
+  font-weight: 700;
+}
+
 /* Empty state */
 .empty-state {
   align-self: center;
@@ -268,6 +272,7 @@ html, body {
 
 #messageForm {
   display: flex;
+  align-items: center;
   gap: 10px;
 }
 
@@ -282,6 +287,13 @@ html, body {
 
 #messageInput:focus { outline: none; border-color: var(--accent); }
 #messageInput:disabled { background: #f3f4f6; color: #9ca3af; cursor: not-allowed; }
+
+#sendBtn {
+  width: auto;
+  flex: 0 0 auto;
+  margin-top: 0;
+  padding: 12px 20px;
+}
 
 /* Scrollbar */
 .chat-messages::-webkit-scrollbar { width: 8px; }
@@ -356,4 +368,3 @@ html, body {
   color: var(--text-muted);
   text-align: center;
 }
-
