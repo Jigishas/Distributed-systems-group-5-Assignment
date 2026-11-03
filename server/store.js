@@ -1,30 +1,17 @@
 'use strict';
 
-/**
- * MessageStore
- * ---------------------------------------------------------------
- * Persists outgoing chat messages to a JSON log file so the system can
- * survive a server crash (or at least not lose *new* messages when a
- * server restarts).
- *
- * The store is an append-only JSON Lines file. Every message the server
- * broadcasts is appended to `data/messages.jsonl`. On restart the server
- * re-validates the log. Clients replay persisted messages from the peer
- * they connect to, so the broadcast history is recoverable after a crash.
- *
- * Limitations (called out in the report):
- *  - JSON Lines is fine for a low-to-moderate write volume but is not a
- *    replacement for a real database (e.g. PostgreSQL / Redis).
- *  - We do NOT guarantee "write-ahead" semantics before we acknowledge a
- *    broadcast, so a crash mid-write could drop at most one message per
- *    process. For stronger guarantees, the append should be atomic (fsync
- *    before ack) — see the report for production notes.
- */
 
 const fs = require('fs');
 const path = require('path');
 
-const DATA_DIR = path.join(__dirname, '..', 'data');
+const DATA_DIR =
+  process.env.CHAT_DATA_DIR ||
+  path.join(
+    __dirname,
+    '..',
+    'data',
+    process.env.SERVER_ID || (process.argv.includes('--replica') ? 'server-2' : 'server-1')
+  );
 const LOG_FILE = path.join(DATA_DIR, 'messages.jsonl');
 
 let fileFd = null;
